@@ -1,7 +1,7 @@
 import 'dart:math';
 
 class PhotoMetadata {
-  final DateTime timestamp;
+  DateTime timestamp;
   final double? latitude;
   final double? longitude;
   final String? accuracy;
@@ -9,8 +9,12 @@ class PhotoMetadata {
   final double? compassHeading;
   final String? weatherDescription;
   final double? temperature;
+  final double? apparentTemperature;
+  final int? humidity;
+  final double? windSpeed;
   final String note;
   final String photoCode;
+  final String address;
 
   PhotoMetadata({
     required this.timestamp,
@@ -21,9 +25,48 @@ class PhotoMetadata {
     this.compassHeading,
     this.weatherDescription,
     this.temperature,
+    this.apparentTemperature,
+    this.humidity,
+    this.windSpeed,
     this.note = '',
+    this.address = '',
     String? photoCode,
   }) : photoCode = photoCode ?? _generatePhotoCode();
+
+  /// Creates a copy of this metadata with the given fields replaced.
+  PhotoMetadata copyWith({
+    DateTime? timestamp,
+    double? latitude,
+    double? longitude,
+    String? accuracy,
+    double? altitude,
+    double? compassHeading,
+    String? weatherDescription,
+    double? temperature,
+    double? apparentTemperature,
+    int? humidity,
+    double? windSpeed,
+    String? note,
+    String? address,
+    String? photoCode,
+  }) {
+    return PhotoMetadata(
+      timestamp: timestamp ?? this.timestamp,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      accuracy: accuracy ?? this.accuracy,
+      altitude: altitude ?? this.altitude,
+      compassHeading: compassHeading ?? this.compassHeading,
+      weatherDescription: weatherDescription ?? this.weatherDescription,
+      temperature: temperature ?? this.temperature,
+      apparentTemperature: apparentTemperature ?? this.apparentTemperature,
+      humidity: humidity ?? this.humidity,
+      windSpeed: windSpeed ?? this.windSpeed,
+      note: note ?? this.note,
+      address: address ?? this.address,
+      photoCode: photoCode ?? this.photoCode,
+    );
+  }
 
   static String _generatePhotoCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -66,19 +109,8 @@ class PhotoMetadata {
     return '${latitude!.abs().toStringAsFixed(6)}°$latDir, ${longitude!.abs().toStringAsFixed(6)}°$lonDir';
   }
 
-  String get formattedLocation {
-    if (latitude == null || longitude == null) {
-      return 'No ubicación disponible';
-    }
-    return 'Lat: ${latitude!.toStringAsFixed(6)}\nLon: ${longitude!.toStringAsFixed(6)}';
-  }
-
-  String get formattedLocationInline {
-    if (latitude == null || longitude == null) {
-      return 'No ubicación';
-    }
-    return '${latitude!.toStringAsFixed(6)}, ${longitude!.toStringAsFixed(6)}';
-  }
+  /// Formatted address string
+  String get formattedAddress => address;
 
   /// Formatted altitude string
   String get formattedAltitude {
@@ -89,7 +121,9 @@ class PhotoMetadata {
   /// Formatted compass heading with cardinal direction
   String get formattedCompass {
     if (compassHeading == null) return 'N/A';
-    final heading = compassHeading!;
+    // Normalize to 0-360 range (sensor can return negative values)
+    double heading = compassHeading! % 360;
+    if (heading < 0) heading += 360;
     String direction;
     if (heading >= 337.5 || heading < 22.5) {
       direction = 'N';
@@ -108,17 +142,20 @@ class PhotoMetadata {
     } else {
       direction = 'NO';
     }
-    return '${heading.toStringAsFixed(0)}° $direction';
+    return '${heading.toStringAsFixed(1)}° $direction';
   }
 
-  /// Formatted weather string
+  /// Formatted weather string with temperature and details
   String get formattedWeather {
     if (weatherDescription == null) return 'N/A';
-    final tempStr = temperature != null ? ' ${temperature!.toStringAsFixed(0)}°F' : '';
-    // Capitalize first letter
+    // Capitalize first letter of description
     final desc = weatherDescription!.isNotEmpty
         ? weatherDescription![0].toUpperCase() + weatherDescription!.substring(1)
         : '';
-    return '$desc$tempStr';
+    final parts = <String>[desc];
+    if (temperature != null) {
+      parts.add('${temperature!.toStringAsFixed(1)}°C');
+    }
+    return parts.join(' | ');
   }
 }

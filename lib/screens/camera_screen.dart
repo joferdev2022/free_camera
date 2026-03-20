@@ -125,7 +125,7 @@ class _CameraScreenState extends State<CameraScreen> {
             location.latitude,
             location.longitude,
           );
-          debugPrint('>>> Clima: ${weatherData?.description} ${weatherData?.temperature}°F');
+          debugPrint('>>> Clima: ${weatherData?.description} ${weatherData?.temperature}°C');
         } catch (e) {
           debugPrint('>>> Error clima: $e');
         }
@@ -143,6 +143,9 @@ class _CameraScreenState extends State<CameraScreen> {
         compassHeading: compassHeading,
         weatherDescription: weatherData?.description,
         temperature: weatherData?.temperature,
+        apparentTemperature: weatherData?.apparentTemperature,
+        humidity: weatherData?.humidity,
+        windSpeed: weatherData?.windSpeed,
       );
 
       debugPrint('>>> Metadata creada: coords=${metadata.formattedCoordinates}, clima=${metadata.formattedWeather}, alt=${metadata.formattedAltitude}');

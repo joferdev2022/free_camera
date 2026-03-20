@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import '../models/photo_metadata.dart';
 import '../services/photo_processor.dart';
 
@@ -20,14 +21,16 @@ class PhotoEditorScreen extends StatefulWidget {
 
 class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   File? _logoFile;
-  final String _logoPosition = 'topLeft';
   bool _isProcessing = false;
   late TextEditingController _noteController;
+  late PhotoMetadata _metadata;
 
   @override
   void initState() {
     super.initState();
     _noteController = TextEditingController();
+    // Create a mutable copy of the metadata so edits don't affect the original
+    _metadata = widget.metadata.copyWith();
   }
 
   @override
@@ -56,18 +59,83 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
     }
   }
 
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _metadata.timestamp,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.greenAccent,
+              onPrimary: Colors.black,
+              surface: Color(0xFF303030),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _metadata.timestamp = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _metadata.timestamp.hour,
+          _metadata.timestamp.minute,
+          _metadata.timestamp.second,
+        );
+      });
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_metadata.timestamp),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.greenAccent,
+              onPrimary: Colors.black,
+              surface: Color(0xFF303030),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _metadata.timestamp = DateTime(
+          _metadata.timestamp.year,
+          _metadata.timestamp.month,
+          _metadata.timestamp.day,
+          picked.hour,
+          picked.minute,
+          _metadata.timestamp.second,
+        );
+      });
+    }
+  }
+
   Future<void> _processAndSavePhoto() async {
     try {
       setState(() {
         _isProcessing = true;
       });
 
-      // Process the photo with overlay
+      // Process the photo with the (possibly edited) metadata overlay
       await PhotoProcessor.addMetadataToPhoto(
         widget.imageFile,
-        widget.metadata,
+        _metadata,
         logoFile: _logoFile,
-        logoPosition: _logoPosition,
         customNote: _noteController.text.trim(),
       );
 
@@ -95,12 +163,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
     } catch (e) {
       print('Error guardando foto: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
         setState(() {
           _isProcessing = false;
         });
@@ -182,10 +247,11 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                       ),
                                     ),
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
                                     children: [
                                       Text(
-                                        widget.metadata.formattedTime,
+                                        _metadata.formattedTime,
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 36,
@@ -196,20 +262,23 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                         width: 1.5,
                                         height: 30,
                                         color: Colors.white54,
-                                        margin: const EdgeInsets.symmetric(horizontal: 10),
+                                        margin: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                        ),
                                       ),
                                       Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            widget.metadata.formattedDate,
+                                            _metadata.formattedDate,
                                             style: const TextStyle(
                                               color: Colors.white,
                                               fontSize: 16,
                                             ),
                                           ),
                                           Text(
-                                            widget.metadata.formattedDayOfWeek,
+                                            _metadata.formattedDayOfWeek,
                                             style: const TextStyle(
                                               color: Colors.white70,
                                               fontSize: 14,
@@ -220,6 +289,18 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                     ],
                                   ),
                                   const SizedBox(height: 6),
+                                  if (_metadata.formattedAddress.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Text(
+                                        _metadata.formattedAddress,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
@@ -233,13 +314,34 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                       ),
                                     ),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        _overlayInfoLine('Coordenadas', widget.metadata.formattedCoordinates),
-                                        _overlayInfoLine('Clima', widget.metadata.formattedWeather),
-                                        _overlayInfoLine('Altitud', widget.metadata.formattedAltitude),
-                                        _overlayInfoLine('Brújula', widget.metadata.formattedCompass),
+                                        _overlayInfoLine(
+                                          'Coordenadas',
+                                          _metadata.formattedCoordinates,
+                                        ),
+                                        _overlayInfoLine(
+                                          'Clima',
+                                          _metadata.formattedWeather,
+                                        ),
+                                        _overlayInfoLine(
+                                          'Altitud',
+                                          _metadata.formattedAltitude,
+                                        ),
+                                        _overlayInfoLine(
+                                          'Brújula',
+                                          _metadata.formattedCompass,
+                                        ),
                                       ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Codigo de Foto: ${_metadata.photoCode}',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
                                     ),
                                   ),
                                 ],
@@ -270,12 +372,107 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            _buildInfoRow(Icons.access_time, 'Hora', widget.metadata.formattedTimeFull),
-                            _buildInfoRow(Icons.calendar_today, 'Fecha', '${widget.metadata.formattedDate} (${widget.metadata.formattedDayOfWeek})'),
-                            _buildInfoRow(Icons.location_on, 'Coordenadas', widget.metadata.formattedCoordinates),
-                            _buildInfoRow(Icons.cloud, 'Clima', widget.metadata.formattedWeather),
-                            _buildInfoRow(Icons.terrain, 'Altitud', widget.metadata.formattedAltitude),
-                            _buildInfoRow(Icons.explore, 'Brújula', widget.metadata.formattedCompass),
+                            _buildEditableInfoRow(
+                              Icons.access_time,
+                              'Hora',
+                              _metadata.formattedTimeFull,
+                              onEdit: _pickTime,
+                            ),
+                            _buildEditableInfoRow(
+                              Icons.calendar_today,
+                              'Fecha',
+                              '${_metadata.formattedDate} (${_metadata.formattedDayOfWeek})',
+                              onEdit: _pickDate,
+                            ),
+                            _buildInfoRow(
+                              Icons.location_on,
+                              'Coordenadas',
+                              _metadata.formattedCoordinates,
+                            ),
+                            _buildInfoRow(
+                              Icons.cloud,
+                              'Clima',
+                              _metadata.formattedWeather,
+                            ),
+                            _buildInfoRow(
+                              Icons.terrain,
+                              'Altitud',
+                              _metadata.formattedAltitude,
+                            ),
+                            _buildInfoRow(
+                              Icons.explore,
+                              'Brújula',
+                              _metadata.formattedCompass,
+                            ),
+                            if (_metadata.formattedAddress.isNotEmpty)
+                              _buildInfoRow(
+                                Icons.place,
+                                'Dirección',
+                                _metadata.formattedAddress,
+                              ),
+                            _buildInfoRow(
+                              Icons.qr_code,
+                              'Código',
+                              _metadata.photoCode,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Date/Time edit card
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Card(
+                      color: Colors.grey[850],
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Editar Fecha y Hora',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Modifica la fecha y hora que aparecerá en la foto',
+                              style: TextStyle(
+                                color: Colors.grey[400],
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _dateTimeButton(
+                                    icon: Icons.calendar_today,
+                                    label: DateFormat(
+                                      'dd/MM/yyyy',
+                                    ).format(_metadata.timestamp),
+                                    onTap: _pickDate,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _dateTimeButton(
+                                    icon: Icons.access_time,
+                                    label: DateFormat(
+                                      'HH:mm:ss',
+                                    ).format(_metadata.timestamp),
+                                    onTap: _pickTime,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -323,7 +520,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide.none,
                                 ),
-                                prefixIcon: Icon(Icons.note, color: Colors.grey[500]),
+                                prefixIcon: Icon(
+                                  Icons.note,
+                                  color: Colors.grey[500],
+                                ),
                               ),
                               maxLines: 2,
                             ),
@@ -361,7 +561,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                                     height: 80,
                                     width: 80,
                                     decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey[700]!),
+                                      border: Border.all(
+                                        color: Colors.grey[700]!,
+                                      ),
                                       borderRadius: BorderRadius.circular(8),
                                       color: Colors.grey[800],
                                     ),
@@ -486,6 +688,75 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEditableInfoRow(
+    IconData icon,
+    String label,
+    String value, {
+    required VoidCallback onEdit,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: Colors.greenAccent),
+          const SizedBox(width: 10),
+          Text(
+            '$label: ',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ),
+          GestureDetector(
+            onTap: onEdit,
+            child: const Icon(Icons.edit, size: 16, color: Colors.greenAccent),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateTimeButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.grey[800],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[700]!),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: Colors.greenAccent),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:image/image.dart' as img;
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
@@ -84,50 +85,48 @@ class PhotoProcessor {
     required double size,
     required Color color,
   }) {
-    final double w = size * 0.8; // width is 80% of height
+    final double w = size * 0.85; // slightly wider
     final double h = size;
     final double cx = x + w / 2; // center x
 
-    // --- Shield outline path ---
+    // --- Shield outline path (Classic straight-edged security shield) ---
     final shieldPath = ui.Path();
-    // Start at top-center
-    shieldPath.moveTo(cx, y);
-    // Top-right curve
-    shieldPath.quadraticBezierTo(cx + w * 0.5, y, cx + w * 0.5, y + h * 0.15);
-    // Right side going down
-    shieldPath.lineTo(cx + w * 0.5, y + h * 0.55);
-    // Bottom-right curve to bottom point
-    shieldPath.quadraticBezierTo(cx + w * 0.5, y + h * 0.78, cx, y + h);
-    // Bottom-left curve
-    shieldPath.quadraticBezierTo(cx - w * 0.5, y + h * 0.78, cx - w * 0.5, y + h * 0.55);
-    // Left side going up
-    shieldPath.lineTo(cx - w * 0.5, y + h * 0.15);
-    // Top-left curve back to top-center
-    shieldPath.quadraticBezierTo(cx - w * 0.5, y, cx, y);
+    final double topY = y + h * 0.08; // slight dip in the top center
+    shieldPath.moveTo(cx, topY);
+    // Line to top-right corner
+    shieldPath.lineTo(cx + w * 0.5, y);
+    // Line down right side
+    shieldPath.lineTo(cx + w * 0.5, y + h * 0.5);
+    // Curve to bottom point
+    shieldPath.quadraticBezierTo(cx + w * 0.5, y + h * 0.85, cx, y + h);
+    // Curve up left side
+    shieldPath.quadraticBezierTo(
+      cx - w * 0.5,
+      y + h * 0.85,
+      cx - w * 0.5,
+      y + h * 0.5,
+    );
+    // Line up left side
+    shieldPath.lineTo(cx - w * 0.5, y);
+    // Back to top-center
     shieldPath.close();
 
-    // Draw shield fill (slightly transparent)
-    final fillPaint = ui.Paint()
-      ..color = color.withAlpha(60)
-      ..style = ui.PaintingStyle.fill;
-    canvas.drawPath(shieldPath, fillPaint);
-
-    // Draw shield border
+    // Draw shield border (outline only)
     final borderPaint = ui.Paint()
       ..color = color
       ..style = ui.PaintingStyle.stroke
-      ..strokeWidth = size * 0.06;
+      ..strokeWidth = size * 0.08
+      ..strokeJoin = ui.StrokeJoin.round;
     canvas.drawPath(shieldPath, borderPaint);
 
     // --- Checkmark inside the shield ---
     final checkPath = ui.Path();
-    // Checkmark proportions relative to shield center
-    final double checkStartX = cx - w * 0.22;
-    final double checkStartY = y + h * 0.48;
-    final double checkMidX = cx - w * 0.02;
-    final double checkMidY = y + h * 0.65;
-    final double checkEndX = cx + w * 0.28;
-    final double checkEndY = y + h * 0.32;
+    final double checkStartX = cx - w * 0.25;
+    final double checkStartY = y + h * 0.50;
+    final double checkMidX = cx - w * 0.05;
+    final double checkMidY = y + h * 0.70;
+    final double checkEndX = cx + w * 0.30;
+    final double checkEndY = y + h * 0.35;
 
     checkPath.moveTo(checkStartX, checkStartY);
     checkPath.lineTo(checkMidX, checkMidY);
@@ -136,7 +135,7 @@ class PhotoProcessor {
     final checkPaint = ui.Paint()
       ..color = color
       ..style = ui.PaintingStyle.stroke
-      ..strokeWidth = size * 0.09
+      ..strokeWidth = size * 0.08
       ..strokeCap = ui.StrokeCap.round
       ..strokeJoin = ui.StrokeJoin.round;
     canvas.drawPath(checkPath, checkPaint);
@@ -165,15 +164,14 @@ class PhotoProcessor {
       }
     }
 
-    final completer = Future<ui.Image>.value(
-      await _decodeRgba(pixels, w, h),
-    );
+    final completer = Future<ui.Image>.value(await _decodeRgba(pixels, w, h));
     return completer;
   }
 
   static Future<ui.Image> _decodeRgba(Uint8List pixels, int w, int h) async {
-    final ui.ImmutableBuffer buffer =
-        await ui.ImmutableBuffer.fromUint8List(pixels);
+    final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+      pixels,
+    );
     final ui.ImageDescriptor descriptor = ui.ImageDescriptor.raw(
       buffer,
       width: w,
@@ -323,7 +321,8 @@ class PhotoProcessor {
     final double totalTimemarkWidth = timePainter.width + markPainter.width;
     final double timemarkMarginRight = 30 * scale;
     final double timemarkMarginTop = 30 * scale;
-    final double timemarkX = imgWidth - totalTimemarkWidth - timemarkMarginRight;
+    final double timemarkX =
+        imgWidth - totalTimemarkWidth - timemarkMarginRight;
     final double timemarkY = timemarkMarginTop;
 
     timePainter.paint(canvas, Offset(timemarkX, timemarkY));
@@ -360,7 +359,7 @@ class PhotoProcessor {
     }
 
     // ============ TIME (large) ============
-    final double timeFontSize = 48 * scale;
+    final double timeFontSize = 64 * scale;
     _drawTextWithShadow(
       canvas,
       metadata.formattedTime,
@@ -393,13 +392,13 @@ class PhotoProcessor {
 
     // ============ DATE + DAY OF WEEK (next to time) ============
     final double dateX = separatorX + (15 * scale);
-    final double dateFontSize = 24 * scale;
+    final double dateFontSize = 30 * scale;
 
     _drawTextWithShadow(
       canvas,
       metadata.formattedDate,
       x: dateX,
-      y: currentY + (2 * scale),
+      y: currentY + (4 * scale),
       fontSize: dateFontSize,
       color: whiteColor,
     );
@@ -407,7 +406,7 @@ class PhotoProcessor {
       canvas,
       metadata.formattedDayOfWeek,
       x: dateX,
-      y: currentY + (2 * scale) + dateFontSize + (4 * scale),
+      y: currentY + (4 * scale) + dateFontSize + (4 * scale),
       fontSize: dateFontSize,
       color: lightGrayColor,
     );
@@ -458,7 +457,8 @@ class PhotoProcessor {
 
     // Use ParagraphBuilder for each line so Canvas handles word-wrap
     // First pass: measure total height needed for the info box
-    final double maxLineWidth = infoBoxWidth - (2 * boxPadding) - (2 * textInset);
+    final double maxLineWidth =
+        infoBoxWidth - (2 * boxPadding) - (2 * textInset);
     final double lineSpacing = 12 * scale; // extra gap between info lines
     final List<TextPainter> infoPainters = [];
 
@@ -491,8 +491,7 @@ class PhotoProcessor {
     final double boxStartY = currentY - boxPadding;
 
     // Draw info box semi-transparent background
-    final boxPaint = ui.Paint()
-      ..color = const Color.fromARGB(90, 90, 90, 90);
+    final boxPaint = ui.Paint()..color = const Color.fromARGB(90, 90, 90, 90);
     final boxRect = ui.RRect.fromRectAndRadius(
       Rect.fromLTWH(boxStartX, boxStartY, infoBoxWidth, infoBoxHeight),
       Radius.circular(8 * scale),
@@ -506,61 +505,90 @@ class PhotoProcessor {
       lineY += infoPainters[i].height + lineSpacing;
     }
 
-    // ============ PHOTO CODE — bottom-left with gray bar + shield icon ============
+    // ============ PHOTO CODE — bottom-left with security icon from asset ============
     final double codeFontSize = 24 * scale;
     final String photoCodeFullText = 'Código de Foto: ${metadata.photoCode}';
 
-    // Measure the text first to size the bar correctly
+    // Measure the text first
     final codeTextPainter = _buildTextPainter(
       photoCodeFullText,
       fontSize: codeFontSize,
       color: lightGrayColor,
     );
 
-    final double shieldSize = codeTextPainter.height * 1.3;
     final double codeBarHeight = codeTextPainter.height + (16 * scale);
     final double codeBarY = imgHeight.toDouble() - codeBarHeight;
 
-    // Draw semi-transparent gray bar spanning the full image width
-    final codeBarPaint = ui.Paint()
-      ..color = const Color.fromARGB(120, 100, 100, 100);
-    canvas.drawRect(
-      Rect.fromLTWH(0, codeBarY, imgWidth.toDouble(), codeBarHeight),
-      codeBarPaint,
-    );
+    // Vertical center of the bar area
+    final double codeContentY =
+        codeBarY + (codeBarHeight - codeTextPainter.height) / 2;
 
-    // Draw thin line ~10px above the text, spanning only the text+shield width
-    final double lineAboveGap = 10 * scale;
-    final double totalContentWidth =
-        (shieldSize * 0.8) + (10 * scale) + codeTextPainter.width;
-    final double lineStartX = textBaseX;
-    final double lineEndX = textBaseX + totalContentWidth;
-    final double lineAboveY = codeBarY + (codeBarHeight - codeTextPainter.height) / 2 - lineAboveGap;
-    final codeBarLinePaint = ui.Paint()
+    // --- Load and draw security.png icon from assets ---
+    final double iconHeight = codeTextPainter.height * 1.3;
+    double codeTextX = textBaseX; // default if icon fails
+    try {
+      final ByteData securityData = await rootBundle.load(
+        'assets/images/security.png',
+      );
+      final Uint8List securityBytes = securityData.buffer.asUint8List();
+      final ui.Codec securityCodec = await ui.instantiateImageCodec(
+        securityBytes,
+      );
+      final ui.FrameInfo securityFrame = await securityCodec.getNextFrame();
+      final ui.Image securityImage = securityFrame.image;
+
+      // Scale the icon to match the desired height, preserving aspect ratio
+      final double aspectRatio = securityImage.width / securityImage.height;
+      final double iconWidth = iconHeight * aspectRatio;
+
+      final double iconX = textBaseX;
+      final double iconY = codeBarY + (codeBarHeight - iconHeight) / 2;
+
+      // Draw the security icon scaled to the target size
+      final ui.Paint iconPaint = ui.Paint()
+        ..filterQuality = ui.FilterQuality.high;
+      final Rect srcRect = Rect.fromLTWH(
+        0,
+        0,
+        securityImage.width.toDouble(),
+        securityImage.height.toDouble(),
+      );
+      final Rect dstRect = Rect.fromLTWH(iconX, iconY, iconWidth, iconHeight);
+      canvas.drawImageRect(securityImage, srcRect, dstRect, iconPaint);
+
+      codeTextX = iconX + iconWidth + (10 * scale);
+
+      securityImage.dispose();
+    } catch (_) {
+      // Fallback: draw the shield-check icon if asset loading fails
+      final double shieldSize = iconHeight;
+      final double shieldX = textBaseX;
+      final double shieldY = codeBarY + (codeBarHeight - shieldSize) / 2;
+      _drawShieldCheck(
+        canvas,
+        x: shieldX,
+        y: shieldY,
+        size: shieldSize,
+        color: lightGrayColor,
+      );
+      codeTextX = shieldX + shieldSize * 0.85 + (10 * scale);
+    }
+
+    // --- Draw thin line 20px above the text, spanning the full content width ---
+    final double totalBottomContentWidth =
+        (codeTextX - textBaseX) + codeTextPainter.width;
+    final double lineAboveGap = 20 * scale;
+    final double lineAboveY = codeContentY - lineAboveGap;
+    final codeLinePaint = ui.Paint()
       ..color = const Color.fromARGB(100, 180, 180, 180)
       ..strokeWidth = 1.5 * scale;
     canvas.drawLine(
-      Offset(lineStartX, lineAboveY),
-      Offset(lineEndX, lineAboveY),
-      codeBarLinePaint,
+      Offset(textBaseX, lineAboveY),
+      Offset(textBaseX + totalBottomContentWidth, lineAboveY),
+      codeLinePaint,
     );
 
-    // Vertical center of the bar
-    final double codeContentY = codeBarY + (codeBarHeight - codeTextPainter.height) / 2;
-
-    // Draw shield-check icon
-    final double shieldX = textBaseX;
-    final double shieldY = codeBarY + (codeBarHeight - shieldSize) / 2;
-    _drawShieldCheck(
-      canvas,
-      x: shieldX,
-      y: shieldY,
-      size: shieldSize,
-      color: lightGrayColor,
-    );
-
-    // Draw photo code text after the shield icon
-    final double codeTextX = shieldX + shieldSize * 0.8 + (10 * scale);
+    // Draw photo code text after the icon
     _drawTextWithShadow(
       canvas,
       photoCodeFullText,
@@ -573,9 +601,28 @@ class PhotoProcessor {
     // ============ RIGHT EDGE — vertical photo code + "Timemark Verified" ============
     // Drawn vertically along the right edge, reading bottom-to-top.
     // No gray bar behind these — just text with shadows.
-    final double rightEdgeFontSize = 18 * scale;
+    final double rightEdgeCodeFontSize =
+        28 * scale; // larger font for the code
+    final double rightEdgeLabelFontSize =
+        28 * scale; // font for "Timemark Verified"
     final double rightEdgeMargin = 15 * scale;
-    const Color rightEdgeTextColor = Color.fromARGB(160, 200, 200, 200);
+    const Color rightEdgeTextColor = ui.Color.fromARGB(234, 253, 251, 251);
+
+    // --- Pre-load security.png icon for right edge (before canvas rotation) ---
+    ui.Image? rightEdgeSecurityIcon;
+    try {
+      final ByteData reSecData = await rootBundle.load(
+        'assets/images/security.png',
+      );
+      final Uint8List reSecBytes = reSecData.buffer.asUint8List();
+      final ui.Codec reSecCodec = await ui.instantiateImageCodec(
+        reSecBytes,
+      );
+      final ui.FrameInfo reSecFrame = await reSecCodec.getNextFrame();
+      rightEdgeSecurityIcon = reSecFrame.image;
+    } catch (_) {
+      // Icon will be null, we draw the fallback shield instead
+    }
 
     // Rotation is -90° (counter-clockwise) = -π/2 radians.
     // This makes text read from bottom to top.
@@ -586,49 +633,102 @@ class PhotoProcessor {
     canvas.save();
     canvas.rotate(-3.14159265 / 2); // -90° = bottom-to-top
 
-    // --- Photo code (vertical, right edge, bottom-to-top) ---
-    // screenX = imgWidth - margin - fontHeight (near the right edge)
-    // screenY = we want text to appear roughly in the middle-to-lower area
-    final double vertScreenX = imgWidth.toDouble() - rightEdgeMargin - rightEdgeFontSize;
+    // --- Icon, Photo code and "Timemark Verified" (vertical, right edge) ---
+    final double vertScreenX =
+        imgWidth.toDouble() - rightEdgeMargin - rightEdgeCodeFontSize;
 
-    // Place the photo code ending around 65% down the image
-    final double codeEndScreenY = imgHeight * 0.65;
-    // In -90° rotated coords: drawX = -screenY, drawY = screenX
-    _drawTextWithShadow(
-      canvas,
-      metadata.photoCode,
-      x: -codeEndScreenY,
-      y: vertScreenX,
-      fontSize: rightEdgeFontSize,
+    // Measure code text to center it vertically on the edge
+    final String codeLabel = metadata.photoCode;
+    final codeVertPainter = _buildTextPainter(
+      codeLabel,
+      fontSize: rightEdgeCodeFontSize,
+      color: rightEdgeTextColor,
+    );
+    final verifiedVertPainter = _buildTextPainter(
+      'Timemark Verified',
+      fontSize: rightEdgeLabelFontSize,
       color: rightEdgeTextColor,
     );
 
-    // --- "Timemark Verified" (vertical, right edge, above the code) ---
-    // "Above" in bottom-to-top direction means further down screen-Y
-    final double verifiedGap = 20 * scale;
+    // Icon dimensions in the rotated space
+    final double reIconSize = rightEdgeCodeFontSize * 1.2;
+    final double reIconGap = 8 * scale;
 
-    // Measure "Timemark Verified" to position it
-    final verifiedPainter = _buildTextPainter(
-      'Timemark Verified',
-      fontSize: rightEdgeFontSize,
+    // Total width of all elements (in rotated space = vertical span on screen)
+    final double vertGap = 20 * scale;
+    final double totalVertWidth = reIconSize + reIconGap +
+        codeVertPainter.width + vertGap + verifiedVertPainter.width;
+
+    // Center the entire group along the image height
+    // In rotated coords, the image height maps to the negative X axis
+    double currentRotatedX = -(imgHeight / 2.0) - (totalVertWidth / 2.0);
+
+    // 0. Draw security icon (in rotated space)
+    if (rightEdgeSecurityIcon != null) {
+      final double iconAspect =
+          rightEdgeSecurityIcon.width / rightEdgeSecurityIcon.height;
+      final double reIconW = reIconSize * iconAspect;
+      final double reIconH = reIconSize;
+      final double reIconY =
+          vertScreenX + (rightEdgeCodeFontSize - reIconH) / 2;
+
+      final ui.Paint reIconPaint = ui.Paint()
+        ..filterQuality = ui.FilterQuality.high;
+      final Rect reSrcRect = Rect.fromLTWH(
+        0,
+        0,
+        rightEdgeSecurityIcon.width.toDouble(),
+        rightEdgeSecurityIcon.height.toDouble(),
+      );
+      final Rect reDstRect = Rect.fromLTWH(
+        currentRotatedX,
+        reIconY,
+        reIconW,
+        reIconH,
+      );
+      canvas.drawImageRect(
+        rightEdgeSecurityIcon,
+        reSrcRect,
+        reDstRect,
+        reIconPaint,
+      );
+      currentRotatedX += reIconW + reIconGap;
+      rightEdgeSecurityIcon.dispose();
+    } else {
+      // Fallback: draw the vector shield icon
+      final double shieldY =
+          vertScreenX + (rightEdgeCodeFontSize - reIconSize) / 2;
+      _drawShieldCheck(
+        canvas,
+        x: currentRotatedX,
+        y: shieldY,
+        size: reIconSize,
+        color: rightEdgeTextColor,
+      );
+      currentRotatedX += reIconSize * 0.85 + reIconGap;
+    }
+
+    // 1. Draw Photo Code (larger font)
+    _drawTextWithShadow(
+      canvas,
+      codeLabel,
+      x: currentRotatedX,
+      y: vertScreenX,
+      fontSize: rightEdgeCodeFontSize,
       color: rightEdgeTextColor,
-      shadows: [
-        const Shadow(
-          offset: Offset(1, 1),
-          blurRadius: 3,
-          color: Color.fromARGB(150, 0, 0, 0),
-        ),
-      ],
     );
+    currentRotatedX += codeVertPainter.width + vertGap;
 
-    // Place it right after (below on screen) the photo code
-    final double verifiedStartScreenY = codeEndScreenY + verifiedGap;
+    // 2. Draw "Timemark Verified" (after the code)
+    // Align baseline: offset vertScreenX to account for font size difference
+    final double labelYOffset =
+        vertScreenX + (rightEdgeCodeFontSize - rightEdgeLabelFontSize);
     _drawTextWithShadow(
       canvas,
       'Timemark Verified',
-      x: -verifiedStartScreenY - verifiedPainter.width,
-      y: vertScreenX,
-      fontSize: rightEdgeFontSize,
+      x: currentRotatedX,
+      y: labelYOffset,
+      fontSize: rightEdgeLabelFontSize,
       color: rightEdgeTextColor,
     );
 

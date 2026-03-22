@@ -1,0 +1,10 @@
+Analyzing free_camera...                                        
+
+   info - Don't invoke 'print' in production code - lib\screens\photo_editor_screen.dart:53:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\screens\photo_editor_screen.dart:164:7 - avoid_print
+warning - The value of the local variable 'rightEdgeMargin' isn't used - lib\services\photo_processor.dart:548:18 - unused_local_variable
+  error - Undefined name 'vertScreenX' - lib\services\photo_processor.dart:570:10 - undefined_identifier
+  error - Undefined name 'vertScreenX' - lib\services\photo_processor.dart:583:10 - undefined_identifier
+  error - Undefined name 'vertScreenX' - lib\services\photo_processor.dart:600:10 - undefined_identifier
+   info - Don't invoke 'print' in production code - lib\services\weather_service.dart:64:7 - avoid_print
+

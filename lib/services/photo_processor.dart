@@ -1,109 +1,234 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/photo_metadata.dart';
 
 class PhotoProcessor {
-  /// Transliterate special characters to ASCII equivalents
-  /// so they render correctly with the built-in bitmap fonts.
-  static String _sanitizeText(String text) {
-    const replacements = {
-      'á': 'a',
-      'é': 'e',
-      'í': 'i',
-      'ó': 'o',
-      'ú': 'u',
-      'Á': 'A',
-      'É': 'E',
-      'Í': 'I',
-      'Ó': 'O',
-      'Ú': 'U',
-      'ñ': 'n',
-      'Ñ': 'N',
-      'ü': 'u',
-      'Ü': 'U',
-      '°': ' ',
-      '¡': '!',
-      '¿': '?',
-      'à': 'a',
-      'è': 'e',
-      'ì': 'i',
-      'ò': 'o',
-      'ù': 'u',
-      'À': 'A',
-      'È': 'E',
-      'Ì': 'I',
-      'Ò': 'O',
-      'Ù': 'U',
-      'â': 'a',
-      'ê': 'e',
-      'î': 'i',
-      'ô': 'o',
-      'û': 'u',
-      'Â': 'A',
-      'Ê': 'E',
-      'Î': 'I',
-      'Ô': 'O',
-      'Û': 'U',
-      'ä': 'a',
-      'ë': 'e',
-      'ï': 'i',
-      'ö': 'o',
-      'Ä': 'A',
-      'Ë': 'E',
-      'Ï': 'I',
-      'Ö': 'O',
-      'ç': 'c',
-      'Ç': 'C',
-    };
-    final buffer = StringBuffer();
-    for (int i = 0; i < text.length; i++) {
-      final char = text[i];
-      buffer.write(replacements[char] ?? char);
-    }
-    return buffer.toString();
+  // ---------------------------------------------------------------------------
+  // Helper: build a TextPainter with the given parameters.
+  // ---------------------------------------------------------------------------
+  static TextPainter _buildTextPainter(
+    String text, {
+    required double fontSize,
+    required Color color,
+    FontWeight fontWeight = FontWeight.normal,
+    double? maxWidth,
+    List<Shadow>? shadows,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: fontSize,
+          color: color,
+          fontWeight: fontWeight,
+          fontFamily: 'Roboto', // default Flutter font, fully unicode-capable
+          shadows: shadows,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: maxWidth != null ? 100 : 1,
+    );
+    painter.layout(maxWidth: maxWidth ?? double.infinity);
+    return painter;
   }
 
-  /// Process a photo and add the metadata overlay
+  // ---------------------------------------------------------------------------
+  // Helper: paint a text string on the canvas with a drop-shadow for
+  // readability, using TextPainter.
+  // ---------------------------------------------------------------------------
+  static void _drawTextWithShadow(
+    ui.Canvas canvas,
+    String text, {
+    required double x,
+    required double y,
+    required double fontSize,
+    required Color color,
+    FontWeight fontWeight = FontWeight.normal,
+    double? maxWidth,
+  }) {
+    final shadows = [
+      const Shadow(
+        offset: Offset(2, 2),
+        blurRadius: 4,
+        color: Color.fromARGB(180, 0, 0, 0),
+      ),
+    ];
+
+    final painter = _buildTextPainter(
+      text,
+      fontSize: fontSize,
+      color: color,
+      fontWeight: fontWeight,
+      maxWidth: maxWidth,
+      shadows: shadows,
+    );
+
+    painter.paint(canvas, Offset(x, y));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: draw a shield icon with a checkmark at the given position.
+  // The shield is drawn using Canvas paths; `size` controls the overall
+  // height of the icon.
+  // ---------------------------------------------------------------------------
+  static void _drawShieldCheck(
+    ui.Canvas canvas, {
+    required double x,
+    required double y,
+    required double size,
+    required Color color,
+  }) {
+    final double w = size * 0.8; // width is 80% of height
+    final double h = size;
+    final double cx = x + w / 2; // center x
+
+    // --- Shield outline path ---
+    final shieldPath = ui.Path();
+    // Start at top-center
+    shieldPath.moveTo(cx, y);
+    // Top-right curve
+    shieldPath.quadraticBezierTo(cx + w * 0.5, y, cx + w * 0.5, y + h * 0.15);
+    // Right side going down
+    shieldPath.lineTo(cx + w * 0.5, y + h * 0.55);
+    // Bottom-right curve to bottom point
+    shieldPath.quadraticBezierTo(cx + w * 0.5, y + h * 0.78, cx, y + h);
+    // Bottom-left curve
+    shieldPath.quadraticBezierTo(cx - w * 0.5, y + h * 0.78, cx - w * 0.5, y + h * 0.55);
+    // Left side going up
+    shieldPath.lineTo(cx - w * 0.5, y + h * 0.15);
+    // Top-left curve back to top-center
+    shieldPath.quadraticBezierTo(cx - w * 0.5, y, cx, y);
+    shieldPath.close();
+
+    // Draw shield fill (slightly transparent)
+    final fillPaint = ui.Paint()
+      ..color = color.withAlpha(60)
+      ..style = ui.PaintingStyle.fill;
+    canvas.drawPath(shieldPath, fillPaint);
+
+    // Draw shield border
+    final borderPaint = ui.Paint()
+      ..color = color
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = size * 0.06;
+    canvas.drawPath(shieldPath, borderPaint);
+
+    // --- Checkmark inside the shield ---
+    final checkPath = ui.Path();
+    // Checkmark proportions relative to shield center
+    final double checkStartX = cx - w * 0.22;
+    final double checkStartY = y + h * 0.48;
+    final double checkMidX = cx - w * 0.02;
+    final double checkMidY = y + h * 0.65;
+    final double checkEndX = cx + w * 0.28;
+    final double checkEndY = y + h * 0.32;
+
+    checkPath.moveTo(checkStartX, checkStartY);
+    checkPath.lineTo(checkMidX, checkMidY);
+    checkPath.lineTo(checkEndX, checkEndY);
+
+    final checkPaint = ui.Paint()
+      ..color = color
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = size * 0.09
+      ..strokeCap = ui.StrokeCap.round
+      ..strokeJoin = ui.StrokeJoin.round;
+    canvas.drawPath(checkPath, checkPaint);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: convert an img.Image (from the `image` package) into a dart:ui
+  // Image. This is necessary so we can draw the photo onto a Canvas.
+  // ---------------------------------------------------------------------------
+  static Future<ui.Image> _imgToUiImage(img.Image src) async {
+    // Ensure RGBA8 format for dart:ui compatibility
+    final rgba = src.convert(numChannels: 4);
+    final int w = rgba.width;
+    final int h = rgba.height;
+
+    // Build an RGBA byte buffer row-by-row
+    final Uint8List pixels = Uint8List(w * h * 4);
+    int offset = 0;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final p = rgba.getPixel(x, y);
+        pixels[offset++] = p.r.toInt();
+        pixels[offset++] = p.g.toInt();
+        pixels[offset++] = p.b.toInt();
+        pixels[offset++] = p.a.toInt();
+      }
+    }
+
+    final completer = Future<ui.Image>.value(
+      await _decodeRgba(pixels, w, h),
+    );
+    return completer;
+  }
+
+  static Future<ui.Image> _decodeRgba(Uint8List pixels, int w, int h) async {
+    final ui.ImmutableBuffer buffer =
+        await ui.ImmutableBuffer.fromUint8List(pixels);
+    final ui.ImageDescriptor descriptor = ui.ImageDescriptor.raw(
+      buffer,
+      width: w,
+      height: h,
+      pixelFormat: ui.PixelFormat.rgba8888,
+    );
+    final ui.Codec codec = await descriptor.instantiateCodec();
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    final ui.Image image = frame.image;
+    descriptor.dispose();
+    buffer.dispose();
+    return image;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main entry point – process a photo and add the metadata overlay.
+  // ---------------------------------------------------------------------------
   static Future<File> addMetadataToPhoto(
     File imageFile,
     PhotoMetadata metadata, {
     File? logoFile,
     String? customNote,
   }) async {
-    // Read the original image
+    // ------------------------------------------------------------------
+    // 1. Decode the original photo with the `image` package
+    // ------------------------------------------------------------------
     final bytes = await imageFile.readAsBytes();
     final originalImage = img.decodeImage(bytes);
     if (originalImage == null) {
       throw Exception('No se pudo decodificar la imagen');
     }
 
-    // Get image dimensions
-    final imgWidth = originalImage.width;
-    final imgHeight = originalImage.height;
-
-    // Create a copy to draw on
-    final image = img.Image.from(originalImage);
+    final int imgWidth = originalImage.width;
+    final int imgHeight = originalImage.height;
 
     // Scale factor based on image width (relative to a 1080px baseline)
-    final scale = imgWidth / 1080.0;
+    final double scale = imgWidth / 1080.0;
 
-    // --- Determine overlay height (35% of image from bottom) ---
+    // Create a mutable copy of the decoded image
+    final image = img.Image.from(originalImage);
+
+    // ------------------------------------------------------------------
+    // 2. Draw gradient overlay at the bottom 38% (pixel-level, image pkg)
+    // ------------------------------------------------------------------
     final overlayHeight = (imgHeight * 0.38).toInt();
     final overlayStartY = imgHeight - overlayHeight;
 
-    // Draw gradient overlay — soft, translucent gray (barely noticeable)
     for (int y = overlayStartY; y < imgHeight; y++) {
       final progress = (y - overlayStartY) / overlayHeight;
-      // Max alpha ~100 for a very subtle overlay
       final alpha = (progress * 100).toInt().clamp(0, 100);
       for (int x = 0; x < imgWidth; x++) {
         final pixel = image.getPixel(x, y);
         final r = pixel.r.toInt();
         final g = pixel.g.toInt();
         final b = pixel.b.toInt();
-        // Blend towards a soft gray (80, 80, 80) instead of pure black
         const tintR = 80;
         const tintG = 80;
         const tintB = 80;
@@ -114,14 +239,15 @@ class PhotoProcessor {
       }
     }
 
-    // --- Draw logo if provided ---
+    // ------------------------------------------------------------------
+    // 3. Composite logo (pixel-level, image pkg)
+    // ------------------------------------------------------------------
     int logoBottomY = 0;
     if (logoFile != null) {
       try {
         final logoBytes = await logoFile.readAsBytes();
         final logoImage = img.decodeImage(logoBytes);
         if (logoImage != null) {
-          // Resize logo — bigger
           final logoMaxHeight = (120 * scale).toInt();
           final logoMaxWidth = (280 * scale).toInt();
           final resizedLogo = img.copyResize(
@@ -130,8 +256,6 @@ class PhotoProcessor {
             height: logoMaxHeight,
             maintainAspect: true,
           );
-
-          // Position logo — shifted right and down
           final logoX = (45 * scale).toInt();
           final logoY = overlayStartY + (45 * scale).toInt();
           logoBottomY = logoY + resizedLogo.height;
@@ -139,328 +263,417 @@ class PhotoProcessor {
           img.compositeImage(image, resizedLogo, dstX: logoX, dstY: logoY);
         }
       } catch (e) {
-        print('Error al procesar logo: $e');
+        // ignore logo errors gracefully
       }
     }
 
-    // --- Draw text overlays ---
-    final white = img.ColorRgba8(255, 255, 255, 255);
-    final lightGray = img.ColorRgba8(200, 200, 200, 255);
-    final yellow = img.ColorRgba8(255, 195, 47, 255);
+    // ------------------------------------------------------------------
+    // 4. Convert to dart:ui Image so we can use Canvas for text
+    // ------------------------------------------------------------------
+    final ui.Image baseUiImage = await _imgToUiImage(image);
 
-    // --- Draw "Timemark" + "Foto 100% Real" in top-right corner ---
-    final timemarkFont = img.arial48; // closest to arial52
-    final fotoRealFont = img.arial24; // closest to arial36
-
-    // "Time" in yellow, "mark" in white — drawn separately
-    // Approximate char width for arial48: ~28px, for arial24: ~14px
-    final timemarkCharWidth = 28;
-    final timeText = 'Time';
-    final markText = 'mark';
-    final timeWidth = timeText.length * timemarkCharWidth;
-    final markWidth = markText.length * timemarkCharWidth;
-    final totalTimemarkWidth = timeWidth + markWidth;
-
-    // Position in top-right corner with margin
-    final timemarkMarginRight = (30 * scale).toInt();
-    final timemarkMarginTop = (30 * scale).toInt();
-    final timemarkX = imgWidth - totalTimemarkWidth - timemarkMarginRight;
-    final timemarkY = timemarkMarginTop;
-
-    // Draw shadow for "Time"
-    img.drawString(
-      image,
-      timeText,
-      font: timemarkFont,
-      x: timemarkX + 2,
-      y: timemarkY + 2,
-      color: img.ColorRgba8(0, 0, 0, 150),
-    );
-    // Draw "Time" in yellow
-    img.drawString(
-      image,
-      timeText,
-      font: timemarkFont,
-      x: timemarkX,
-      y: timemarkY,
-      color: yellow,
+    // Set up PictureRecorder + Canvas
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, imgWidth.toDouble(), imgHeight.toDouble()),
     );
 
-    // Draw shadow for "mark"
-    final markX = timemarkX + timeWidth;
-    img.drawString(
-      image,
-      markText,
-      font: timemarkFont,
-      x: markX + 2,
-      y: timemarkY + 2,
-      color: img.ColorRgba8(0, 0, 0, 150),
-    );
-    // Draw "mark" in white
-    img.drawString(
-      image,
-      markText,
-      font: timemarkFont,
-      x: markX,
-      y: timemarkY,
-      color: white,
-    );
+    // Draw the base image (with gradient + logo already baked in)
+    canvas.drawImage(baseUiImage, Offset.zero, ui.Paint());
 
-    // Draw "Foto 100% Real" below "Timemark"
-    final fotoRealText = 'Foto 100% Real';
-    final fotoRealCharWidth = 14; // approximate char width for arial24
-    final fotoRealWidth = fotoRealText.length * fotoRealCharWidth;
-    // Center "Foto 100% Real" relative to "Timemark"
-    final fotoRealX = timemarkX + ((totalTimemarkWidth - fotoRealWidth) ~/ 2);
-    final fotoRealY = timemarkY + 52; // below Timemark text
+    // ------------------------------------------------------------------
+    // 5. Draw "Timemark" + "Foto 100% Real" — top-right corner
+    // ------------------------------------------------------------------
+    const Color yellowColor = Color.fromRGBO(255, 195, 47, 1.0);
+    const Color whiteColor = Color.fromRGBO(255, 255, 255, 1.0);
+    const Color lightGrayColor = Color.fromRGBO(200, 200, 200, 1.0);
 
-    // Draw shadow for readability
-    img.drawString(
-      image,
-      fotoRealText,
-      font: fotoRealFont,
-      x: fotoRealX + 1,
-      y: fotoRealY + 1,
-      color: img.ColorRgba8(0, 0, 0, 150),
+    final double timemarkFontSize = 52 * scale;
+    final double fotoRealFontSize = 36 * scale;
+
+    // Measure "Time" and "mark" to position them
+    final timePainter = _buildTextPainter(
+      'Time',
+      fontSize: timemarkFontSize,
+      color: yellowColor,
+      fontWeight: FontWeight.bold,
+      shadows: [
+        const Shadow(
+          offset: Offset(2, 2),
+          blurRadius: 4,
+          color: Color.fromARGB(180, 0, 0, 0),
+        ),
+      ],
     );
-    // Draw "Foto 100% Real" in lightGray (same as photo code color)
-    img.drawString(
-      image,
-      fotoRealText,
-      font: fotoRealFont,
-      x: fotoRealX,
-      y: fotoRealY,
-      color: lightGray,
+    final markPainter = _buildTextPainter(
+      'mark',
+      fontSize: timemarkFontSize,
+      color: whiteColor,
+      fontWeight: FontWeight.bold,
+      shadows: [
+        const Shadow(
+          offset: Offset(2, 2),
+          blurRadius: 4,
+          color: Color.fromARGB(180, 0, 0, 0),
+        ),
+      ],
     );
 
-    // Use the largest built-in font for all text (arial48)
-    final bigFont = img.arial48;
-    final medFont = img.arial24;
+    final double totalTimemarkWidth = timePainter.width + markPainter.width;
+    final double timemarkMarginRight = 30 * scale;
+    final double timemarkMarginTop = 30 * scale;
+    final double timemarkX = imgWidth - totalTimemarkWidth - timemarkMarginRight;
+    final double timemarkY = timemarkMarginTop;
 
-    // Calculate base Y position for text — shifted right and down
-    final textBaseX = (50 * scale).toInt();
-    int currentY;
+    timePainter.paint(canvas, Offset(timemarkX, timemarkY));
+    markPainter.paint(canvas, Offset(timemarkX + timePainter.width, timemarkY));
+
+    // "Foto 100% Real" — centered below "Timemark"
+    final fotoRealPainter = _buildTextPainter(
+      'Foto 100% Real',
+      fontSize: fotoRealFontSize,
+      color: lightGrayColor,
+      fontWeight: FontWeight.normal,
+      shadows: [
+        const Shadow(
+          offset: Offset(1, 1),
+          blurRadius: 3,
+          color: Color.fromARGB(150, 0, 0, 0),
+        ),
+      ],
+    );
+    final double fotoRealX =
+        timemarkX + (totalTimemarkWidth - fotoRealPainter.width) / 2;
+    final double fotoRealY = timemarkY + timePainter.height + (4 * scale);
+    fotoRealPainter.paint(canvas, Offset(fotoRealX, fotoRealY));
+
+    // ------------------------------------------------------------------
+    // 6. Draw bottom-left text overlays (time, date, info box, photo code)
+    // ------------------------------------------------------------------
+    final double textBaseX = 50 * scale;
+    double currentY;
     if (logoFile != null && logoBottomY > 0) {
-      currentY = logoBottomY + (20 * scale).toInt();
+      currentY = logoBottomY + (20 * scale);
     } else {
-      currentY = overlayStartY + (40 * scale).toInt();
+      currentY = overlayStartY + (40 * scale);
     }
 
-    // ============ TIME (very large) ============
-    img.drawString(
-      image,
-      _sanitizeText(metadata.formattedTime),
-      font: bigFont,
+    // ============ TIME (large) ============
+    final double timeFontSize = 48 * scale;
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedTime,
       x: textBaseX,
       y: currentY,
-      color: white,
+      fontSize: timeFontSize,
+      color: whiteColor,
+      fontWeight: FontWeight.bold,
     );
 
-    // Calculate time text width to position date next to it
-    // arial48 chars are ~28px wide each
-    final timeCharWidth = 28;
-    final timeTextWidth = metadata.formattedTime.length * timeCharWidth;
-    final separatorX = textBaseX + timeTextWidth + (15 * scale).toInt();
+    // Measure the time text to position separator + date
+    final timeTextPainter = _buildTextPainter(
+      metadata.formattedTime,
+      fontSize: timeFontSize,
+      color: whiteColor,
+      fontWeight: FontWeight.bold,
+    );
 
-    // Draw vertical separator line (thicker)
-    final separatorTopY = currentY + 4;
-    final separatorBottomY = currentY + 44;
-    for (int y = separatorTopY; y < separatorBottomY; y++) {
-      for (int dx = 0; dx < 3; dx++) {
-        final sx = separatorX + dx;
-        if (sx < imgWidth) {
-          image.setPixelRgba(sx, y, 255, 255, 255, 180);
-        }
-      }
-    }
+    final double separatorX = textBaseX + timeTextPainter.width + (15 * scale);
+
+    // Vertical separator line
+    final separatorPaint = ui.Paint()
+      ..color = const Color.fromARGB(180, 255, 255, 255)
+      ..strokeWidth = 3 * scale;
+    canvas.drawLine(
+      Offset(separatorX, currentY + 6 * scale),
+      Offset(separatorX, currentY + timeTextPainter.height - 6 * scale),
+      separatorPaint,
+    );
 
     // ============ DATE + DAY OF WEEK (next to time) ============
-    final dateX = separatorX + (15 * scale).toInt();
-    img.drawString(
-      image,
-      _sanitizeText(metadata.formattedDate),
-      font: medFont,
+    final double dateX = separatorX + (15 * scale);
+    final double dateFontSize = 24 * scale;
+
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedDate,
       x: dateX,
-      y: currentY + 2,
-      color: white,
+      y: currentY + (2 * scale),
+      fontSize: dateFontSize,
+      color: whiteColor,
     );
-    img.drawString(
-      image,
-      _sanitizeText(metadata.formattedDayOfWeek),
-      font: medFont,
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedDayOfWeek,
       x: dateX,
-      y: currentY + 28,
-      color: lightGray,
+      y: currentY + (2 * scale) + dateFontSize + (4 * scale),
+      fontSize: dateFontSize,
+      color: lightGrayColor,
     );
 
-    // Move Y down past the time row
-    currentY += 60;
+    // Move Y past the time row
+    currentY += timeTextPainter.height + (16 * scale);
+
+    // ============ ADDRESS (if available) ============
+    if (metadata.formattedAddress.isNotEmpty) {
+      _drawTextWithShadow(
+        canvas,
+        metadata.formattedAddress,
+        x: textBaseX,
+        y: currentY,
+        fontSize: 28 * scale,
+        color: whiteColor,
+        fontWeight: FontWeight.bold,
+      );
+      final addrPainter = _buildTextPainter(
+        metadata.formattedAddress,
+        fontSize: 28 * scale,
+        color: whiteColor,
+        fontWeight: FontWeight.bold,
+      );
+      currentY += addrPainter.height + (12 * scale);
+    }
 
     // ============ INFO BOX ============
-    // Font for info box: arial24 is the closest built-in to arial36
-    // (the image package only provides arial14, arial24, arial48).
-    final infoFont = img.arial24;
-    // Approximate character width for arial24 bitmap font
-    const infoCharWidth = 13;
+    final double infoFontSize = 36 * scale;
+    final double boxPadding = 14 * scale;
+    final double textInset = 10 * scale;
+    final double infoBoxWidth = imgWidth * 0.78;
+    final double boxStartX = textBaseX - boxPadding;
 
-    // Build raw info lines (before wrapping)
-    final rawInfoLines = <String>[
-      _sanitizeText('Coordenadas: ${metadata.formattedCoordinates}'),
-      _sanitizeText('Clima: ${metadata.formattedWeather}'),
-      _sanitizeText('Altitud: ${metadata.formattedAltitude}'),
-      _sanitizeText('Brujula: ${metadata.formattedCompass}'),
+    // Build info lines
+    final infoLines = <String>[
+      'Coordenadas: ${metadata.formattedCoordinates}',
+      'Clima: ${metadata.formattedWeather}',
+      'Altitud: ${metadata.formattedAltitude}',
+      'Brújula: ${metadata.formattedCompass}',
     ];
 
     if (customNote != null && customNote.isNotEmpty) {
-      rawInfoLines.add(_sanitizeText('NOTA: ${customNote.toUpperCase()}'));
+      infoLines.add('NOTA: ${customNote.toUpperCase()}');
     } else if (metadata.note.isNotEmpty) {
-      rawInfoLines.add(_sanitizeText('NOTA: ${metadata.note.toUpperCase()}'));
+      infoLines.add('NOTA: ${metadata.note.toUpperCase()}');
     }
 
-    // --- Word-wrap logic ---
-    final boxPadding = (14 * scale).toInt();
-    final infoBoxWidth = (imgWidth * 0.78).toInt();
-    final textInset = (8 * scale).toInt();
-    // Maximum available pixel width for text inside the box
-    final maxTextWidth = infoBoxWidth - (2 * boxPadding) - (2 * textInset);
-    // Maximum characters that fit in one line
-    final maxCharsPerLine = (maxTextWidth / infoCharWidth).floor().clamp(1, 9999);
+    // Use ParagraphBuilder for each line so Canvas handles word-wrap
+    // First pass: measure total height needed for the info box
+    final double maxLineWidth = infoBoxWidth - (2 * boxPadding) - (2 * textInset);
+    final double lineSpacing = 12 * scale; // extra gap between info lines
+    final List<TextPainter> infoPainters = [];
 
-    // Wrap a single string into multiple lines respecting word boundaries
-    List<String> wrapLine(String text, int maxChars) {
-      if (text.length <= maxChars) return [text];
-      final words = text.split(' ');
-      final lines = <String>[];
-      var current = '';
-      for (final word in words) {
-        if (current.isEmpty) {
-          // If a single word exceeds maxChars, force-break it
-          if (word.length > maxChars) {
-            int start = 0;
-            while (start < word.length) {
-              final end = (start + maxChars).clamp(0, word.length);
-              lines.add(word.substring(start, end));
-              start = end;
-            }
-          } else {
-            current = word;
-          }
-        } else if ((current.length + 1 + word.length) <= maxChars) {
-          current += ' $word';
-        } else {
-          lines.add(current);
-          // Handle word longer than maxChars after a line break
-          if (word.length > maxChars) {
-            int start = 0;
-            while (start < word.length) {
-              final end = (start + maxChars).clamp(0, word.length);
-              lines.add(word.substring(start, end));
-              start = end;
-            }
-            current = '';
-          } else {
-            current = word;
-          }
-        }
-      }
-      if (current.isNotEmpty) {
-        lines.add(current);
-      }
-      return lines;
+    for (final line in infoLines) {
+      final painter = _buildTextPainter(
+        line,
+        fontSize: infoFontSize,
+        color: whiteColor,
+        maxWidth: maxLineWidth,
+        shadows: [
+          const Shadow(
+            offset: Offset(1, 1),
+            blurRadius: 3,
+            color: Color.fromARGB(150, 0, 0, 0),
+          ),
+        ],
+      );
+      infoPainters.add(painter);
     }
 
-    // Apply wrapping to all info lines
-    final wrappedInfoLines = <String>[];
-    for (final line in rawInfoLines) {
-      wrappedInfoLines.addAll(wrapLine(line, maxCharsPerLine));
-    }
-
-    // Line height: increased spacing between rows for readability
-    // arial24 glyphs are ~24px tall; using 34px gives ~10px gap between lines
-    final lineHeight = 34;
-    final infoBoxHeight =
-        (wrappedInfoLines.length * lineHeight) + (boxPadding * 2);
-
-    // Draw info box — soft, subtle semi-transparent gray background
-    final boxStartX = textBaseX - boxPadding;
-    final boxStartY = currentY - boxPadding;
-    for (
-      int y = boxStartY;
-      y < boxStartY + infoBoxHeight && y < imgHeight;
-      y++
-    ) {
-      for (
-        int x = boxStartX;
-        x < boxStartX + infoBoxWidth && x < imgWidth;
-        x++
-      ) {
-        if (x >= 0 && y >= 0) {
-          final pixel = image.getPixel(x, y);
-          // Blend with soft gray (90,90,90) at ~35% opacity for a subtle look
-          const tintR = 90;
-          const tintG = 90;
-          const tintB = 90;
-          const blendAlpha = 90; // out of 255
-          final r = (pixel.r.toInt() +
-                  ((tintR - pixel.r.toInt()) * blendAlpha / 255))
-              .toInt()
-              .clamp(0, 255);
-          final g = (pixel.g.toInt() +
-                  ((tintG - pixel.g.toInt()) * blendAlpha / 255))
-              .toInt()
-              .clamp(0, 255);
-          final b = (pixel.b.toInt() +
-                  ((tintB - pixel.b.toInt()) * blendAlpha / 255))
-              .toInt()
-              .clamp(0, 255);
-          image.setPixelRgba(x, y, r, g, b, 255);
-        }
+    double totalInfoHeight = 0;
+    for (int i = 0; i < infoPainters.length; i++) {
+      totalInfoHeight += infoPainters[i].height;
+      if (i < infoPainters.length - 1) {
+        totalInfoHeight += lineSpacing;
       }
     }
 
-    // Draw each wrapped info line
-    for (int i = 0; i < wrappedInfoLines.length; i++) {
-      final lineY = currentY + (i * lineHeight);
-      if (lineY < imgHeight - 20) {
-        img.drawString(
-          image,
-          wrappedInfoLines[i],
-          font: infoFont,
-          x: textBaseX + textInset,
-          y: lineY,
-          color: white,
-        );
-      }
-    }
+    final double infoBoxHeight = totalInfoHeight + (2 * boxPadding);
+    final double boxStartY = currentY - boxPadding;
 
-    // --- Draw photo code at bottom-left ---
-    final photoCodeText = _sanitizeText('Codigo de Foto: ${metadata.photoCode}');
-    final codeY = imgHeight - (35 * scale).toInt();
-    final codeX = textBaseX;
-    // Draw shadow for readability
-    img.drawString(
-      image,
-      photoCodeText,
-      font: medFont,
-      x: codeX + 1,
-      y: codeY + 1,
-      color: img.ColorRgba8(0, 0, 0, 150),
+    // Draw info box semi-transparent background
+    final boxPaint = ui.Paint()
+      ..color = const Color.fromARGB(90, 90, 90, 90);
+    final boxRect = ui.RRect.fromRectAndRadius(
+      Rect.fromLTWH(boxStartX, boxStartY, infoBoxWidth, infoBoxHeight),
+      Radius.circular(8 * scale),
     );
-    img.drawString(
-      image,
-      photoCodeText,
-      font: medFont,
-      x: codeX,
-      y: codeY,
-      color: lightGray,
+    canvas.drawRRect(boxRect, boxPaint);
+
+    // Draw each info line (TextPainter handles wrapping automatically)
+    double lineY = currentY;
+    for (int i = 0; i < infoPainters.length; i++) {
+      infoPainters[i].paint(canvas, Offset(textBaseX + textInset, lineY));
+      lineY += infoPainters[i].height + lineSpacing;
+    }
+
+    // ============ PHOTO CODE — bottom-left with gray bar + shield icon ============
+    final double codeFontSize = 24 * scale;
+    final String photoCodeFullText = 'Código de Foto: ${metadata.photoCode}';
+
+    // Measure the text first to size the bar correctly
+    final codeTextPainter = _buildTextPainter(
+      photoCodeFullText,
+      fontSize: codeFontSize,
+      color: lightGrayColor,
     );
 
-    // --- Save the processed image ---
+    final double shieldSize = codeTextPainter.height * 1.3;
+    final double codeBarHeight = codeTextPainter.height + (16 * scale);
+    final double codeBarY = imgHeight.toDouble() - codeBarHeight;
+
+    // Draw semi-transparent gray bar spanning the full image width
+    final codeBarPaint = ui.Paint()
+      ..color = const Color.fromARGB(120, 100, 100, 100);
+    canvas.drawRect(
+      Rect.fromLTWH(0, codeBarY, imgWidth.toDouble(), codeBarHeight),
+      codeBarPaint,
+    );
+
+    // Draw thin line ~10px above the text, spanning only the text+shield width
+    final double lineAboveGap = 10 * scale;
+    final double totalContentWidth =
+        (shieldSize * 0.8) + (10 * scale) + codeTextPainter.width;
+    final double lineStartX = textBaseX;
+    final double lineEndX = textBaseX + totalContentWidth;
+    final double lineAboveY = codeBarY + (codeBarHeight - codeTextPainter.height) / 2 - lineAboveGap;
+    final codeBarLinePaint = ui.Paint()
+      ..color = const Color.fromARGB(100, 180, 180, 180)
+      ..strokeWidth = 1.5 * scale;
+    canvas.drawLine(
+      Offset(lineStartX, lineAboveY),
+      Offset(lineEndX, lineAboveY),
+      codeBarLinePaint,
+    );
+
+    // Vertical center of the bar
+    final double codeContentY = codeBarY + (codeBarHeight - codeTextPainter.height) / 2;
+
+    // Draw shield-check icon
+    final double shieldX = textBaseX;
+    final double shieldY = codeBarY + (codeBarHeight - shieldSize) / 2;
+    _drawShieldCheck(
+      canvas,
+      x: shieldX,
+      y: shieldY,
+      size: shieldSize,
+      color: lightGrayColor,
+    );
+
+    // Draw photo code text after the shield icon
+    final double codeTextX = shieldX + shieldSize * 0.8 + (10 * scale);
+    _drawTextWithShadow(
+      canvas,
+      photoCodeFullText,
+      x: codeTextX,
+      y: codeContentY,
+      fontSize: codeFontSize,
+      color: lightGrayColor,
+    );
+
+    // ============ RIGHT EDGE — vertical photo code + "Timemark Verified" ============
+    // Drawn vertically along the right edge, reading bottom-to-top.
+    // No gray bar behind these — just text with shadows.
+    final double rightEdgeFontSize = 18 * scale;
+    final double rightEdgeMargin = 15 * scale;
+    const Color rightEdgeTextColor = Color.fromARGB(160, 200, 200, 200);
+
+    // Rotation is -90° (counter-clockwise) = -π/2 radians.
+    // This makes text read from bottom to top.
+    // After rotating -90°:
+    //   To place text at screen position (screenX, screenY),
+    //   draw at canvas coords (-screenY, screenX).
+
+    canvas.save();
+    canvas.rotate(-3.14159265 / 2); // -90° = bottom-to-top
+
+    // --- Photo code (vertical, right edge, bottom-to-top) ---
+    // screenX = imgWidth - margin - fontHeight (near the right edge)
+    // screenY = we want text to appear roughly in the middle-to-lower area
+    final double vertScreenX = imgWidth.toDouble() - rightEdgeMargin - rightEdgeFontSize;
+
+    // Place the photo code ending around 65% down the image
+    final double codeEndScreenY = imgHeight * 0.65;
+    // In -90° rotated coords: drawX = -screenY, drawY = screenX
+    _drawTextWithShadow(
+      canvas,
+      metadata.photoCode,
+      x: -codeEndScreenY,
+      y: vertScreenX,
+      fontSize: rightEdgeFontSize,
+      color: rightEdgeTextColor,
+    );
+
+    // --- "Timemark Verified" (vertical, right edge, above the code) ---
+    // "Above" in bottom-to-top direction means further down screen-Y
+    final double verifiedGap = 20 * scale;
+
+    // Measure "Timemark Verified" to position it
+    final verifiedPainter = _buildTextPainter(
+      'Timemark Verified',
+      fontSize: rightEdgeFontSize,
+      color: rightEdgeTextColor,
+      shadows: [
+        const Shadow(
+          offset: Offset(1, 1),
+          blurRadius: 3,
+          color: Color.fromARGB(150, 0, 0, 0),
+        ),
+      ],
+    );
+
+    // Place it right after (below on screen) the photo code
+    final double verifiedStartScreenY = codeEndScreenY + verifiedGap;
+    _drawTextWithShadow(
+      canvas,
+      'Timemark Verified',
+      x: -verifiedStartScreenY - verifiedPainter.width,
+      y: vertScreenX,
+      fontSize: rightEdgeFontSize,
+      color: rightEdgeTextColor,
+    );
+
+    canvas.restore();
+
+    // ------------------------------------------------------------------
+    // 7. Encode the Canvas result back to JPEG bytes
+    // ------------------------------------------------------------------
+    final picture = recorder.endRecording();
+    final ui.Image finalImage = await picture.toImage(imgWidth, imgHeight);
+    final ByteData? byteData = await finalImage.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+
+    if (byteData == null) {
+      throw Exception('Error al renderizar la imagen procesada');
+    }
+
+    // Convert raw RGBA back to img.Image for JPEG encoding
+    final Uint8List rawPixels = byteData.buffer.asUint8List();
+    final outputImg = img.Image(width: imgWidth, height: imgHeight);
+    int pixelOffset = 0;
+    for (int y = 0; y < imgHeight; y++) {
+      for (int x = 0; x < imgWidth; x++) {
+        final r = rawPixels[pixelOffset];
+        final g = rawPixels[pixelOffset + 1];
+        final b = rawPixels[pixelOffset + 2];
+        final a = rawPixels[pixelOffset + 3];
+        outputImg.setPixelRgba(x, y, r, g, b, a);
+        pixelOffset += 4;
+      }
+    }
+
+    // Clean up dart:ui resources
+    baseUiImage.dispose();
+    finalImage.dispose();
+
+    // ------------------------------------------------------------------
+    // 8. Save to file + gallery
+    // ------------------------------------------------------------------
     final tempDir = await getTemporaryDirectory();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final outputPath = '${tempDir.path}/processed_photo_$timestamp.jpg';
 
-    final encodedBytes = img.encodeJpg(image, quality: 95);
+    final encodedBytes = img.encodeJpg(outputImg, quality: 95);
     final outputFile = File(outputPath);
     await outputFile.writeAsBytes(encodedBytes);
 

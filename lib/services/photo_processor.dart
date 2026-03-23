@@ -238,27 +238,62 @@ class PhotoProcessor {
     }
 
     // ------------------------------------------------------------------
-    // 3. Composite logo (pixel-level, image pkg)
+    // 3. Prepare logo for Canvas drawing (decode + resize + round corners)
+    //    The logo will be drawn on the Canvas in step 6 so it participates
+    //    in the dynamic layout and never overlaps with text.
     // ------------------------------------------------------------------
-    int logoBottomY = 0;
+    img.Image? preparedLogo;
+    int preparedLogoWidth = 0;
+    int preparedLogoHeight = 0;
     if (logoFile != null) {
       try {
         final logoBytes = await logoFile.readAsBytes();
         final logoImage = img.decodeImage(logoBytes);
         if (logoImage != null) {
-          final logoMaxHeight = (120 * scale).toInt();
-          final logoMaxWidth = (280 * scale).toInt();
+          final logoMaxHeight = (160 * scale).toInt();
+          final logoMaxWidth = (360 * scale).toInt();
           final resizedLogo = img.copyResize(
             logoImage,
             width: logoMaxWidth,
             height: logoMaxHeight,
             maintainAspect: true,
           );
-          final logoX = (45 * scale).toInt();
-          final logoY = overlayStartY + (45 * scale).toInt();
-          logoBottomY = logoY + resizedLogo.height;
 
-          img.compositeImage(image, resizedLogo, dstX: logoX, dstY: logoY);
+          // Apply rounded corners to the logo
+          final int cornerRadius = (18 * scale).toInt().clamp(1, 999);
+          final int lw = resizedLogo.width;
+          final int lh = resizedLogo.height;
+          for (int py = 0; py < lh; py++) {
+            for (int px = 0; px < lw; px++) {
+              bool inCorner = false;
+              int dx = 0, dy = 0;
+              if (px < cornerRadius && py < cornerRadius) {
+                dx = cornerRadius - px;
+                dy = cornerRadius - py;
+                inCorner = true;
+              } else if (px >= lw - cornerRadius && py < cornerRadius) {
+                dx = px - (lw - cornerRadius - 1);
+                dy = cornerRadius - py;
+                inCorner = true;
+              } else if (px < cornerRadius && py >= lh - cornerRadius) {
+                dx = cornerRadius - px;
+                dy = py - (lh - cornerRadius - 1);
+                inCorner = true;
+              } else if (px >= lw - cornerRadius && py >= lh - cornerRadius) {
+                dx = px - (lw - cornerRadius - 1);
+                dy = py - (lh - cornerRadius - 1);
+                inCorner = true;
+              }
+              if (inCorner &&
+                  (dx * dx + dy * dy) > cornerRadius * cornerRadius) {
+                resizedLogo.setPixelRgba(px, py, 0, 0, 0, 0);
+              }
+            }
+          }
+
+          preparedLogo = resizedLogo;
+          preparedLogoWidth = lw;
+          preparedLogoHeight = lh;
         }
       } catch (e) {
         // ignore logo errors gracefully
@@ -349,99 +384,43 @@ class PhotoProcessor {
 
     // ------------------------------------------------------------------
     // 6. Draw bottom-left text overlays (time, date, info box, photo code)
+    //
+    // STRATEGY: Measure everything FIRST, compute the ideal startY so that
+    // all content fits between the logo (or overlay top) and the photo-code
+    // line at the bottom, with a minimum 35px (scaled) gap before the code.
     // ------------------------------------------------------------------
     final double textBaseX = 50 * scale;
-    double currentY;
-    if (logoFile != null && logoBottomY > 0) {
-      currentY = logoBottomY + (20 * scale);
-    } else {
-      currentY = overlayStartY + (40 * scale);
-    }
+    final double minGap = 35 * scale;
 
-    // ============ TIME (large) ============
-    final double timeFontSize = 64 * scale;
-    _drawTextWithShadow(
-      canvas,
-      metadata.formattedTime,
-      x: textBaseX,
-      y: currentY,
-      fontSize: timeFontSize,
-      color: whiteColor,
-      fontWeight: FontWeight.bold,
-    );
-
-    // Measure the time text to position separator + date
+    // --- Pre-measure all elements ---
+    final double timeFontSize = 86 * scale;
     final timeTextPainter = _buildTextPainter(
       metadata.formattedTime,
       fontSize: timeFontSize,
       color: whiteColor,
-      fontWeight: FontWeight.bold,
     );
 
-    final double separatorX = textBaseX + timeTextPainter.width + (15 * scale);
+    final double dateFontSize = 38 * scale;
+    final double addrFontSize = 34 * scale;
 
-    // Vertical separator line
-    final separatorPaint = ui.Paint()
-      ..color = const Color.fromARGB(180, 255, 255, 255)
-      ..strokeWidth = 3 * scale;
-    canvas.drawLine(
-      Offset(separatorX, currentY + 6 * scale),
-      Offset(separatorX, currentY + timeTextPainter.height - 6 * scale),
-      separatorPaint,
-    );
-
-    // ============ DATE + DAY OF WEEK (next to time) ============
-    final double dateX = separatorX + (15 * scale);
-    final double dateFontSize = 30 * scale;
-
-    _drawTextWithShadow(
-      canvas,
-      metadata.formattedDate,
-      x: dateX,
-      y: currentY + (4 * scale),
-      fontSize: dateFontSize,
-      color: whiteColor,
-    );
-    _drawTextWithShadow(
-      canvas,
-      metadata.formattedDayOfWeek,
-      x: dateX,
-      y: currentY + (4 * scale) + dateFontSize + (4 * scale),
-      fontSize: dateFontSize,
-      color: lightGrayColor,
-    );
-
-    // Move Y past the time row
-    currentY += timeTextPainter.height + (16 * scale);
-
-    // ============ ADDRESS (if available) ============
+    double addressHeight = 0;
     if (metadata.formattedAddress.isNotEmpty) {
-      _drawTextWithShadow(
-        canvas,
-        metadata.formattedAddress,
-        x: textBaseX,
-        y: currentY,
-        fontSize: 28 * scale,
-        color: whiteColor,
-        fontWeight: FontWeight.bold,
-      );
       final addrPainter = _buildTextPainter(
         metadata.formattedAddress,
-        fontSize: 28 * scale,
+        fontSize: addrFontSize,
         color: whiteColor,
         fontWeight: FontWeight.bold,
       );
-      currentY += addrPainter.height + (12 * scale);
+      addressHeight = addrPainter.height + (12 * scale); // height + bottom gap
     }
 
-    // ============ INFO BOX ============
-    final double infoFontSize = 36 * scale;
+    // Info box measurements
+    final double infoFontSize = 42 * scale;
     final double boxPadding = 14 * scale;
     final double textInset = 10 * scale;
     final double infoBoxWidth = imgWidth * 0.78;
     final double boxStartX = textBaseX - boxPadding;
 
-    // Build info lines
     final infoLines = <String>[
       'Coordenadas: ${metadata.formattedCoordinates}',
       'Clima: ${metadata.formattedWeather}',
@@ -455,11 +434,9 @@ class PhotoProcessor {
       infoLines.add('NOTA: ${metadata.note.toUpperCase()}');
     }
 
-    // Use ParagraphBuilder for each line so Canvas handles word-wrap
-    // First pass: measure total height needed for the info box
     final double maxLineWidth =
         infoBoxWidth - (2 * boxPadding) - (2 * textInset);
-    final double lineSpacing = 12 * scale; // extra gap between info lines
+    final double lineSpacing = 12 * scale;
     final List<TextPainter> infoPainters = [];
 
     for (final line in infoLines) {
@@ -486,8 +463,134 @@ class PhotoProcessor {
         totalInfoHeight += lineSpacing;
       }
     }
-
     final double infoBoxHeight = totalInfoHeight + (2 * boxPadding);
+
+    // Photo code measurements (needed to know the bottom boundary)
+    final double codeFontSize = 24 * scale;
+    final String photoCodeFullText = 'Código de Foto: ${metadata.photoCode}';
+    final codeTextPainter = _buildTextPainter(
+      photoCodeFullText,
+      fontSize: codeFontSize,
+      color: lightGrayColor,
+    );
+    final double codeBarHeight = codeTextPainter.height + (16 * scale);
+    final double codeBarY = imgHeight.toDouble() - codeBarHeight;
+    final double codeContentY =
+        codeBarY + (codeBarHeight - codeTextPainter.height) / 2;
+    final double codeLineAboveY = codeContentY - (20 * scale);
+
+    // --- Compute total height of all stacked elements (including logo) ---
+    final double logoGap = 20 * scale; // gap between logo and time
+    final double logoTotalHeight = (preparedLogo != null)
+        ? preparedLogoHeight.toDouble() + logoGap
+        : 0;
+    final double timeRowHeight =
+        timeTextPainter.height + (16 * scale); // time row + gap
+    final double totalContentHeight =
+        logoTotalHeight + timeRowHeight + addressHeight + infoBoxHeight;
+
+    // The bottom boundary: the info box must end at least 35px above the code line
+    final double maxBottomY = codeLineAboveY - minGap;
+
+    // The ideal top position: where we'd like to start drawing
+    final double idealStartY = overlayStartY + (40 * scale);
+
+    // Check if the content fits between idealStartY and maxBottomY
+    final double contentEndY = idealStartY + totalContentHeight;
+    double startY;
+    if (contentEndY <= maxBottomY) {
+      // Fits normally — use the ideal start position
+      startY = idealStartY;
+    } else {
+      // Doesn't fit — push startY upward so the bottom of
+      // the content aligns with maxBottomY
+      startY = maxBottomY - totalContentHeight;
+      // But don't go above a reasonable minimum (e.g. 10% of the image)
+      final double absoluteMinY = imgHeight * 0.10;
+      if (startY < absoluteMinY) {
+        startY = absoluteMinY;
+      }
+    }
+
+    // --- Now DRAW everything from startY downward ---
+    double currentY = startY;
+
+    // ============ LOGO (if available) ============
+    if (preparedLogo != null) {
+      final ui.Image logoUiImage = await _imgToUiImage(preparedLogo);
+      final double logoDrawX = textBaseX;
+      final double logoDrawY = currentY;
+      canvas.drawImage(logoUiImage, Offset(logoDrawX, logoDrawY), ui.Paint());
+      logoUiImage.dispose();
+      currentY += preparedLogoHeight.toDouble() + logoGap;
+    }
+
+    // ============ TIME (large) ============
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedTime,
+      x: textBaseX,
+      y: currentY,
+      fontSize: timeFontSize,
+      color: whiteColor,
+    );
+
+    final double separatorX = textBaseX + timeTextPainter.width + (15 * scale);
+
+    // Vertical separator line
+    final separatorPaint = ui.Paint()
+      ..color = const Color.fromARGB(180, 255, 255, 255)
+      ..strokeWidth = 3 * scale;
+    canvas.drawLine(
+      Offset(separatorX, currentY + 6 * scale),
+      Offset(separatorX, currentY + timeTextPainter.height - 6 * scale),
+      separatorPaint,
+    );
+
+    // ============ DATE + DAY OF WEEK (next to time) ============
+    final double dateX = separatorX + (15 * scale);
+
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedDate,
+      x: dateX,
+      y: currentY + (6 * scale),
+      fontSize: dateFontSize,
+      color: whiteColor,
+    );
+    _drawTextWithShadow(
+      canvas,
+      metadata.formattedDayOfWeek,
+      x: dateX,
+      y: currentY + (6 * scale) + dateFontSize + (4 * scale),
+      fontSize: dateFontSize,
+      color: whiteColor,
+    );
+
+    // Move Y past the time row
+    currentY += timeTextPainter.height + (16 * scale);
+
+    // ============ ADDRESS (if available) ============
+    if (metadata.formattedAddress.isNotEmpty) {
+      _drawTextWithShadow(
+        canvas,
+        metadata.formattedAddress,
+        x: textBaseX,
+        y: currentY,
+        fontSize: addrFontSize,
+        color: whiteColor,
+        fontWeight: FontWeight.bold,
+      );
+      final addrPainter = _buildTextPainter(
+        metadata.formattedAddress,
+        fontSize: addrFontSize,
+        color: whiteColor,
+        fontWeight: FontWeight.bold,
+      );
+      currentY += addrPainter.height + (12 * scale);
+    }
+
+    // ============ INFO BOX ============
     final double boxStartY = currentY - boxPadding;
 
     // Draw info box semi-transparent background
@@ -498,30 +601,12 @@ class PhotoProcessor {
     );
     canvas.drawRRect(boxRect, boxPaint);
 
-    // Draw each info line (TextPainter handles wrapping automatically)
+    // Draw each info line
     double lineY = currentY;
     for (int i = 0; i < infoPainters.length; i++) {
       infoPainters[i].paint(canvas, Offset(textBaseX + textInset, lineY));
       lineY += infoPainters[i].height + lineSpacing;
     }
-
-    // ============ PHOTO CODE — bottom-left with security icon from asset ============
-    final double codeFontSize = 24 * scale;
-    final String photoCodeFullText = 'Código de Foto: ${metadata.photoCode}';
-
-    // Measure the text first
-    final codeTextPainter = _buildTextPainter(
-      photoCodeFullText,
-      fontSize: codeFontSize,
-      color: lightGrayColor,
-    );
-
-    final double codeBarHeight = codeTextPainter.height + (16 * scale);
-    final double codeBarY = imgHeight.toDouble() - codeBarHeight;
-
-    // Vertical center of the bar area
-    final double codeContentY =
-        codeBarY + (codeBarHeight - codeTextPainter.height) / 2;
 
     // --- Load and draw security.png icon from assets ---
     final double iconHeight = codeTextPainter.height * 1.3;
@@ -601,8 +686,7 @@ class PhotoProcessor {
     // ============ RIGHT EDGE — vertical photo code + "Timemark Verified" ============
     // Drawn vertically along the right edge, reading bottom-to-top.
     // No gray bar behind these — just text with shadows.
-    final double rightEdgeCodeFontSize =
-        28 * scale; // larger font for the code
+    final double rightEdgeCodeFontSize = 28 * scale; // larger font for the code
     final double rightEdgeLabelFontSize =
         28 * scale; // font for "Timemark Verified"
     final double rightEdgeMargin = 15 * scale;
@@ -615,9 +699,7 @@ class PhotoProcessor {
         'assets/images/security.png',
       );
       final Uint8List reSecBytes = reSecData.buffer.asUint8List();
-      final ui.Codec reSecCodec = await ui.instantiateImageCodec(
-        reSecBytes,
-      );
+      final ui.Codec reSecCodec = await ui.instantiateImageCodec(reSecBytes);
       final ui.FrameInfo reSecFrame = await reSecCodec.getNextFrame();
       rightEdgeSecurityIcon = reSecFrame.image;
     } catch (_) {
@@ -656,8 +738,12 @@ class PhotoProcessor {
 
     // Total width of all elements (in rotated space = vertical span on screen)
     final double vertGap = 20 * scale;
-    final double totalVertWidth = reIconSize + reIconGap +
-        codeVertPainter.width + vertGap + verifiedVertPainter.width;
+    final double totalVertWidth =
+        reIconSize +
+        reIconGap +
+        codeVertPainter.width +
+        vertGap +
+        verifiedVertPainter.width;
 
     // Center the entire group along the image height
     // In rotated coords, the image height maps to the negative X axis

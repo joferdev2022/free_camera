@@ -594,7 +594,7 @@ class PhotoProcessor {
     final double boxStartY = currentY - boxPadding;
 
     // Draw info box semi-transparent background
-    final boxPaint = ui.Paint()..color = const Color.fromARGB(90, 90, 90, 90);
+    final boxPaint = ui.Paint()..color = const Color.fromARGB(30, 90, 90, 90);
     final boxRect = ui.RRect.fromRectAndRadius(
       Rect.fromLTWH(boxStartX, boxStartY, infoBoxWidth, infoBoxHeight),
       Radius.circular(8 * scale),

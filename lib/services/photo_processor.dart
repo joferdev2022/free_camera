@@ -252,44 +252,30 @@ class PhotoProcessor {
         if (logoImage != null) {
           final logoMaxHeight = (160 * scale).toInt();
           final logoMaxWidth = (360 * scale).toInt();
+
+          // Only constrain by ONE dimension to avoid black padding bars.
+          // When both width AND height are given with maintainAspect,
+          // the image package pads the rest with black — that's the
+          // "black rectangle" the user sees.
+          final double logoAspect = logoImage.width / logoImage.height;
+          int targetW, targetH;
+          if (logoAspect >= (logoMaxWidth / logoMaxHeight)) {
+            // Logo is wider than the bounding box — constrain by width
+            targetW = logoMaxWidth;
+            targetH = (logoMaxWidth / logoAspect).round();
+          } else {
+            // Logo is taller — constrain by height
+            targetH = logoMaxHeight;
+            targetW = (logoMaxHeight * logoAspect).round();
+          }
           final resizedLogo = img.copyResize(
             logoImage,
-            width: logoMaxWidth,
-            height: logoMaxHeight,
-            maintainAspect: true,
+            width: targetW,
+            height: targetH,
           );
 
-          // Apply rounded corners to the logo
-          final int cornerRadius = (18 * scale).toInt().clamp(1, 999);
           final int lw = resizedLogo.width;
           final int lh = resizedLogo.height;
-          for (int py = 0; py < lh; py++) {
-            for (int px = 0; px < lw; px++) {
-              bool inCorner = false;
-              int dx = 0, dy = 0;
-              if (px < cornerRadius && py < cornerRadius) {
-                dx = cornerRadius - px;
-                dy = cornerRadius - py;
-                inCorner = true;
-              } else if (px >= lw - cornerRadius && py < cornerRadius) {
-                dx = px - (lw - cornerRadius - 1);
-                dy = cornerRadius - py;
-                inCorner = true;
-              } else if (px < cornerRadius && py >= lh - cornerRadius) {
-                dx = cornerRadius - px;
-                dy = py - (lh - cornerRadius - 1);
-                inCorner = true;
-              } else if (px >= lw - cornerRadius && py >= lh - cornerRadius) {
-                dx = px - (lw - cornerRadius - 1);
-                dy = py - (lh - cornerRadius - 1);
-                inCorner = true;
-              }
-              if (inCorner &&
-                  (dx * dx + dy * dy) > cornerRadius * cornerRadius) {
-                resizedLogo.setPixelRgba(px, py, 0, 0, 0, 0);
-              }
-            }
-          }
 
           preparedLogo = resizedLogo;
           preparedLogoWidth = lw;
@@ -393,14 +379,15 @@ class PhotoProcessor {
     final double minGap = 35 * scale;
 
     // --- Pre-measure all elements ---
-    final double timeFontSize = 86 * scale;
+    final double timeFontSize = 122 * scale;
     final timeTextPainter = _buildTextPainter(
       metadata.formattedTime,
       fontSize: timeFontSize,
       color: whiteColor,
+      fontWeight: FontWeight.w300,
     );
 
-    final double dateFontSize = 38 * scale;
+    final double dateFontSize = 52 * scale;
     final double addrFontSize = 34 * scale;
 
     double addressHeight = 0;
@@ -520,20 +507,34 @@ class PhotoProcessor {
       final ui.Image logoUiImage = await _imgToUiImage(preparedLogo);
       final double logoDrawX = textBaseX;
       final double logoDrawY = currentY;
+
+      canvas.save();
+      canvas.clipRRect(RRect.fromRectAndRadius(
+        Rect.fromLTWH(logoDrawX, logoDrawY, preparedLogoWidth.toDouble(), preparedLogoHeight.toDouble()),
+        Radius.circular(18 * scale),
+      ));
       canvas.drawImage(logoUiImage, Offset(logoDrawX, logoDrawY), ui.Paint());
+      canvas.restore();
+      
       logoUiImage.dispose();
       currentY += preparedLogoHeight.toDouble() + logoGap;
     }
 
-    // ============ TIME (large) ============
-    _drawTextWithShadow(
-      canvas,
+    // ============ TIME (large, light weight, no heavy shadow) ============
+    final timePainterFinal = _buildTextPainter(
       metadata.formattedTime,
-      x: textBaseX,
-      y: currentY,
       fontSize: timeFontSize,
       color: whiteColor,
+      fontWeight: FontWeight.w300,
+      shadows: [
+        const Shadow(
+          offset: Offset(1, 1),
+          blurRadius: 2,
+          color: Color.fromARGB(100, 0, 0, 0),
+        ),
+      ],
     );
+    timePainterFinal.paint(canvas, Offset(textBaseX, currentY));
 
     final double separatorX = textBaseX + timeTextPainter.width + (15 * scale);
 
@@ -549,12 +550,14 @@ class PhotoProcessor {
 
     // ============ DATE + DAY OF WEEK (next to time) ============
     final double dateX = separatorX + (15 * scale);
+    final double dateBlockHeight = (dateFontSize * 2) + (4 * scale);
+    final double dateStartY = currentY + (timeTextPainter.height - dateBlockHeight) / 2;
 
     _drawTextWithShadow(
       canvas,
       metadata.formattedDate,
       x: dateX,
-      y: currentY + (6 * scale),
+      y: dateStartY,
       fontSize: dateFontSize,
       color: whiteColor,
     );
@@ -562,7 +565,7 @@ class PhotoProcessor {
       canvas,
       metadata.formattedDayOfWeek,
       x: dateX,
-      y: currentY + (6 * scale) + dateFontSize + (4 * scale),
+      y: dateStartY + dateFontSize + (4 * scale),
       fontSize: dateFontSize,
       color: whiteColor,
     );

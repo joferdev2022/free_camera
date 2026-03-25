@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
 class LocationService {
   static final LocationService _instance = LocationService._internal();
@@ -63,6 +65,58 @@ class LocationService {
       }
     } catch (e) {
       debugPrint('LocationService: Error general: $e');
+      return null;
+    }
+  }
+
+  /// Reverse-geocode [latitude]/[longitude] to a human-readable address
+  /// using the free Nominatim (OpenStreetMap) API.
+  Future<String?> getAddress(double latitude, double longitude) async {
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=$latitude'
+        '&lon=$longitude'
+        '&format=json'
+        '&addressdetails=1'
+        '&accept-language=es',
+      );
+
+      final response = await http
+          .get(url, headers: {'User-Agent': 'FreeCameraApp/1.0'})
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final addr = data['address'];
+        if (addr != null) {
+          final parts = <String>[];
+          // Road / street
+          final road = addr['road'] ?? addr['pedestrian'] ?? addr['highway'];
+          if (road != null) parts.add(road as String);
+          // Suburb / neighbourhood
+          final suburb = addr['suburb'] ?? addr['neighbourhood'];
+          if (suburb != null) parts.add(suburb as String);
+
+          // Already have 2 parts → return immediately (short address)
+          if (parts.length >= 2) return parts.join(', ');
+
+          // Fallback: fill up to 2 parts with city/town
+          final city = addr['city'] ??
+              addr['town'] ??
+              addr['village'] ??
+              addr['municipality'];
+          if (city != null && parts.length < 2) parts.add(city as String);
+
+          if (parts.isNotEmpty) return parts.join(', ');
+        }
+        // Fallback to display_name
+        final displayName = data['display_name'];
+        return displayName is String ? displayName : null;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('LocationService: Error reverse geocoding: $e');
       return null;
     }
   }

@@ -388,7 +388,7 @@ class PhotoProcessor {
     );
 
     final double dateFontSize = 52 * scale;
-    final double addrFontSize = 34 * scale;
+    final double addrFontSize = 42 * scale;
 
     double addressHeight = 0;
     if (metadata.formattedAddress.isNotEmpty) {
@@ -396,9 +396,8 @@ class PhotoProcessor {
         metadata.formattedAddress,
         fontSize: addrFontSize,
         color: whiteColor,
-        fontWeight: FontWeight.bold,
       );
-      addressHeight = addrPainter.height + (12 * scale); // height + bottom gap
+      addressHeight = addrPainter.height + (34 * scale); // height + 20px visual gap (+ boxPadding)
     }
 
     // Info box measurements
@@ -432,13 +431,6 @@ class PhotoProcessor {
         fontSize: infoFontSize,
         color: whiteColor,
         maxWidth: maxLineWidth,
-        shadows: [
-          const Shadow(
-            offset: Offset(1, 1),
-            blurRadius: 3,
-            color: Color.fromARGB(150, 0, 0, 0),
-          ),
-        ],
       );
       infoPainters.add(painter);
     }
@@ -520,19 +512,12 @@ class PhotoProcessor {
       currentY += preparedLogoHeight.toDouble() + logoGap;
     }
 
-    // ============ TIME (large, light weight, no heavy shadow) ============
+    // ============ TIME (large, light weight) ============
     final timePainterFinal = _buildTextPainter(
       metadata.formattedTime,
       fontSize: timeFontSize,
       color: whiteColor,
       fontWeight: FontWeight.w300,
-      shadows: [
-        const Shadow(
-          offset: Offset(1, 1),
-          blurRadius: 2,
-          color: Color.fromARGB(100, 0, 0, 0),
-        ),
-      ],
     );
     timePainterFinal.paint(canvas, Offset(textBaseX, currentY));
 
@@ -553,44 +538,32 @@ class PhotoProcessor {
     final double dateBlockHeight = (dateFontSize * 2) + (4 * scale);
     final double dateStartY = currentY + (timeTextPainter.height - dateBlockHeight) / 2;
 
-    _drawTextWithShadow(
-      canvas,
+    final datePainter = _buildTextPainter(
       metadata.formattedDate,
-      x: dateX,
-      y: dateStartY,
       fontSize: dateFontSize,
       color: whiteColor,
     );
-    _drawTextWithShadow(
-      canvas,
+    datePainter.paint(canvas, Offset(dateX, dateStartY));
+
+    final dayPainter = _buildTextPainter(
       metadata.formattedDayOfWeek,
-      x: dateX,
-      y: dateStartY + dateFontSize + (4 * scale),
       fontSize: dateFontSize,
       color: whiteColor,
     );
+    dayPainter.paint(canvas, Offset(dateX, dateStartY + dateFontSize + (4 * scale)));
 
     // Move Y past the time row
     currentY += timeTextPainter.height + (16 * scale);
 
     // ============ ADDRESS (if available) ============
     if (metadata.formattedAddress.isNotEmpty) {
-      _drawTextWithShadow(
-        canvas,
-        metadata.formattedAddress,
-        x: textBaseX,
-        y: currentY,
-        fontSize: addrFontSize,
-        color: whiteColor,
-        fontWeight: FontWeight.bold,
-      );
       final addrPainter = _buildTextPainter(
         metadata.formattedAddress,
         fontSize: addrFontSize,
         color: whiteColor,
-        fontWeight: FontWeight.bold,
       );
-      currentY += addrPainter.height + (12 * scale);
+      addrPainter.paint(canvas, Offset(textBaseX, currentY));
+      currentY += addrPainter.height + (34 * scale); // 20px visual gap to info box (+ boxPadding)
     }
 
     // ============ INFO BOX ============
